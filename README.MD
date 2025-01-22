@@ -22,5 +22,5 @@ For examples seee the tests/ folder.
 
 <a href="https://brainmade.org/">
     Made with love by a human.
-    <img src="https://brainmade.org/88x31-light.png" align="right">
+    <img src="https://brainmade.org/88x31-dark.png" align="right">
 </a>

@@ -17,3 +17,10 @@ For examples seee the tests/ folder.
 - actual interrupt handling.
 - try to get rid of nightly in tests or wait for trait upcasting to be a core feature of Rust.
 - multithreading support.
+
+---
+
+<a href="https://brainmade.org/">
+    Made with love by humans.
+    <img src="https://brainmade.org/88x31-light.png" align="right">
+</a>

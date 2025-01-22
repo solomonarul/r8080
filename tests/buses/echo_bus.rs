@@ -30,7 +30,7 @@ impl Bus8080 for EchoBus
     }
 
     fn out_b(&mut self, _: &mut Registers, b: u8, a: u8) {
-        println!("[INFO]: Written {:02X} to device {:02X} on EchoBus.", b, a);
+        println!("[INFO]: Written {:02X} to device {:02X} on EchoBus.", a, b);
     }
 
     fn read_b(&self, a: u16) -> u8 {

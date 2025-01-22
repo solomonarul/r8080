@@ -21,6 +21,6 @@ For examples seee the tests/ folder.
 ---
 
 <a href="https://brainmade.org/">
-    Made with love by humans.
+    Made with love by a human.
     <img src="https://brainmade.org/88x31-light.png" align="right">
 </a>

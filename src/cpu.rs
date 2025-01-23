@@ -20,7 +20,6 @@ pub trait CPU8080: Any + Send + Sync
     fn force_jump(&mut self, a: u16);
     fn set_bus(&mut self, b: Arc<RwLock<Box<dyn Bus8080>>>);
     fn get_bus(&self) -> Arc<RwLock<Box<dyn Bus8080>>>;
-    fn remove_bus(&mut self) -> Arc<RwLock<Box<dyn Bus8080>>>;
     fn stop(&mut self);
     fn is_running(&mut self) -> bool;
     fn step(&mut self);

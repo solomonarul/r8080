@@ -3,27 +3,36 @@ use r8080::{cpu::{Register16, Registers}, Bus8080};
 pub struct TestCPMBus
 {
     ram: [u8; 0x10000],
-    output: Vec<u8>
+    output: Vec<u8>,
+    expected_output: &'static str
 }
 
-#[allow(dead_code)]
 impl TestCPMBus
 {
-    pub fn new() -> Self {
-        Self {
+    pub fn new(expected_output: &'static str) -> Self {
+        let mut result = Self {
             ram: [0x00; 0x10000],
-            output: Vec::new()
-        }
-    }
+            output: Vec::new(),
+            expected_output
+        };
 
-    pub fn dump_range(&self, start: u16, end: u16) {
-        for (index, value) in self.ram[start as usize..end as usize].iter().enumerate() {
-            println!("{:04X}: {:02X}", index + start as usize, value)
-        }
-    }
+        result.write_buffer(0x0000, [0xD3, 0x00].to_vec());         // Stop.
+        result.write_buffer(0x0005, [0xD3, 0x01, 0xC9].to_vec());   // Print and ret.
 
-    pub fn get_output(&self) -> &Vec<u8> {
-        &self.output
+        result
+    }
+}
+
+impl Drop for TestCPMBus {
+    fn drop(&mut self) {
+        // If output is not what we expected, cry about it.
+        if self.output != self.expected_output.as_bytes() {
+            for char in &self.output
+            {
+                print!("{}", *char as char);
+            }
+            panic!("[EROR]: Test ended with wrong output.");
+        }
     }
 }
 

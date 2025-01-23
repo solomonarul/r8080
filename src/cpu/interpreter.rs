@@ -1,4 +1,3 @@
-use std::mem::replace;
 use std::sync::{Arc, RwLock};
 use crate::{Bus8080, ErrorBus};
 use crate::cpu::{CPU8080, Instruction8080, InstructionAction, Registers, Register16, Register8, RegisterFlags};
@@ -34,10 +33,6 @@ impl CPU8080 for Interpreter8080
 
     fn get_bus(&self) -> Arc<RwLock<Box<dyn Bus8080>>> {
         Arc::clone(&self.bus)
-    }
-
-    fn remove_bus(&mut self) -> Arc<RwLock<Box<dyn Bus8080>>> {
-        replace(&mut self.bus, Arc::new(RwLock::new(Box::new(ErrorBus::new()))))
     }
 
     fn stop(&mut self) {

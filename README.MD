@@ -14,8 +14,6 @@ For examples seee the tests/ folder.
 
 - graceful error handling.
 - pass all tests.
-- actual interrupt handling.
-- multithreading support.
 
 ---
 

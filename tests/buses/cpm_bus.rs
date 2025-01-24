@@ -38,6 +38,18 @@ impl Drop for TestCPMBus {
 
 impl Bus8080 for TestCPMBus
 {
+    fn get_interrupt(&mut self) -> u8 {
+        0x00
+    }
+    
+    fn has_interrupt(&self) -> bool {
+        false
+    }
+
+    fn push_interrupt(&mut self, _: u8) {
+        
+    }
+
     fn in_b(&mut self, _: &mut Registers, _: u8) -> u8 {
         0xFF
     }

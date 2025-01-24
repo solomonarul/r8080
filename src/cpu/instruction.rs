@@ -262,8 +262,7 @@ impl Instruction8080
         }
     }
 
-    pub fn from_opcode(pc: u16, bus: &Box<dyn Bus8080>) -> Self {
-        let opcode = bus.as_ref().read_b(pc);
+    pub fn from_opcode(opcode: u8, pc: u16, bus: &Box<dyn Bus8080>) -> Self {
         let (opcode_high, opcode_low) = ((opcode & 0xF0) >> 4, opcode & 0xF);
         let mut result = Instruction8080::new(opcode);
 
@@ -582,7 +581,11 @@ impl Instruction8080
             }
 
             // IN
-            (0xD, 0xB) => { result.action = InstructionAction::In8; }
+            (0xD, 0xB) => {
+                result.length += 1;
+                result.action = InstructionAction::In8;
+                result.target = InstructionTarget::Immediate8 { value: bus.read_b(pc + 1) }
+            }
 
             // Exchange
             (0xE, 0xB) => { result.action = InstructionAction::Exchange; }

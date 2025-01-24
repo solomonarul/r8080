@@ -45,8 +45,16 @@ impl CPU8080 for Interpreter8080
 
     fn step(&mut self) {
         let mut bus_write = self.bus.write().unwrap();
-        let instruction = Instruction8080::from_opcode(self.registers.pc, &bus_write);
-        self.registers.pc += instruction.length as u16;
+        // Check and execute interrupts if needed.
+        let instruction = if self.registers.interrupts && bus_write.has_interrupt() {
+            Instruction8080::from_opcode(bus_write.get_interrupt(), self.registers.pc, &bus_write)
+        }
+        else {
+            let opcode = bus_write.as_ref().read_b(self.registers.pc);
+            let instruction = Instruction8080::from_opcode(opcode, self.registers.pc, &bus_write);
+            self.registers.pc += instruction.length as u16;
+            instruction
+        };
 
         match instruction.action {
         // Default / unimplemented.
@@ -86,10 +94,9 @@ impl CPU8080 for Interpreter8080
             }
 
             InstructionAction::Halt => {
-                self.registers.running = false; // TODO: actual halting.
+                self.registers.running = false;
             }
 
-            // TODO: proper interrupt handling.
             InstructionAction::SetInterrupts { enabled } => {
                 self.registers.interrupts = enabled
             }

@@ -8,6 +8,9 @@ pub trait Bus8080: Any
 {
     fn read_b(&self, a: u16) -> u8;
     fn read_w(&self, a: u16) -> u16;
+    fn has_interrupt(&self) -> bool;
+    fn get_interrupt(&mut self) -> u8;
+    fn push_interrupt(&mut self, b: u8);
     fn write_b(&mut self, a: u16, b: u8);
     fn write_w(&mut self, a: u16, w: u16);
     fn in_b(&mut self, regs: &mut Registers, b: u8) -> u8;
@@ -26,6 +29,18 @@ impl ErrorBus
 impl Bus8080 for ErrorBus
 {
     fn in_b(&mut self, _: &mut Registers, _: u8) -> u8 {
+        panic!("Unimplemented Bus.");
+    }
+
+    fn get_interrupt(&mut self) -> u8 {
+        panic!("Unimplemented Bus.");
+    }
+
+    fn has_interrupt(&self) -> bool {
+        panic!("Unimplemented Bus.");
+    }
+
+    fn push_interrupt(&mut self, _: u8) {
         panic!("Unimplemented Bus.");
     }
 

@@ -15,7 +15,6 @@ For examples seee the tests/ folder.
 - graceful error handling.
 - pass all tests.
 - actual interrupt handling.
-- try to get rid of nightly in tests or wait for trait upcasting to be a core feature of Rust.
 - multithreading support.
 
 ---

@@ -1,4 +1,3 @@
-#![feature(trait_upcasting)]
 mod buses;
 
 use std::{fs::File, io::Read, sync::{Arc, RwLock}};

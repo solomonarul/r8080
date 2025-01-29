@@ -12,8 +12,8 @@ For examples seee the tests/ folder.
 
 ### TODOs:
 
+- cycle accurate execution.
 - graceful error handling.
-- pass all tests.
 
 ---
 

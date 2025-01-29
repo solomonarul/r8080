@@ -6,7 +6,6 @@ pub enum Condition
     None,
     NotZero, Zero,
     NotCarry, Carry,
-    Auxiliary, NotAuxiliary,
     PairtyOdd, ParityEven,
     Plus, Minus
 }
@@ -14,7 +13,7 @@ pub enum Condition
 #[derive(Debug, Clone, Copy)]
 pub enum Register16
 {
-    BC, DE, HL, SP, DSW
+    BC, DE, HL, SP, PSW
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -42,8 +41,10 @@ pub enum InstructionAction
     MovReg { register: Register8 },
     XorReg { register: Register8 },
     AddReg { register: Register8, carry: bool },
-    SubReg { register: Register8, carry: bool },
+    SubReg { register: Register8, borrow: bool },
     DAAReg { register: Register8 },
+    IncrementReg { register: Register8 },
+    DecrementReg { register: Register8 },
     RotateReg { register: Register8, right: bool, arithmetic: bool },
     CompareReg { register: Register8 },
     ComplementReg { register: Register8 },
@@ -111,6 +112,7 @@ pub struct Registers
     pub a: u8, pub b: u8, pub c: u8,
     pub d: u8, pub e: u8, pub f: u8,
     pub interrupts: bool,
+    pub halting: bool,
     pub running: bool
 }
 
@@ -123,8 +125,15 @@ impl Registers
             h: 0x00, l: 0x00,
             a: 0x00, b: 0x00, c: 0x00,
             d: 0x00, e: 0x00, f: 0x02,
+            halting: false,
             interrupts: true, running: true
         }
+    }
+
+    pub fn set_zsp(&mut self, value: u8) {
+        self.set_flag(RegisterFlags::Zero, value == 0);
+        self.set_flag(RegisterFlags::Sign, (value >> 7) != 0);
+        self.set_flag(RegisterFlags::Parity, (value.count_ones() % 2) == 0);
     }
 
     pub fn set_flag(&mut self, flag: RegisterFlags, value: bool)
@@ -151,7 +160,7 @@ impl Registers
                 if !value { self.f & !(1 << 7) }
                 else { self.f | (1 << 7) }
             }
-        }
+        };
     }
     
     pub fn get_flag(&self, flag: RegisterFlags) -> bool {
@@ -171,8 +180,6 @@ impl Registers
             Condition::NotCarry => { !self.get_flag(RegisterFlags::Carry) }
             Condition::PairtyOdd => { !self.get_flag(RegisterFlags::Parity) }
             Condition::ParityEven => { self.get_flag(RegisterFlags::Parity) }
-            Condition::Auxiliary => { self.get_flag(RegisterFlags::HalfCarry) }
-            Condition::NotAuxiliary => { !self.get_flag(RegisterFlags::HalfCarry) }
             Condition::Zero => { self.get_flag(RegisterFlags::Zero) }
             Condition::NotZero => { !self.get_flag(RegisterFlags::Zero) }
             Condition::Plus => { !self.get_flag(RegisterFlags::Sign) }
@@ -187,7 +194,7 @@ impl Registers
             Register16::BC => { ((self.b as u16) << 8) as u16 | self.c as u16 }
             Register16::DE => { ((self.d as u16) << 8) as u16 | self.e as u16 }
             Register16::HL => { ((self.h as u16) << 8) as u16 | self.l as u16 }
-            Register16::DSW => { ((self.a as u16) << 8) as u16 | self.f as u16 }
+            Register16::PSW => { ((self.a as u16) << 8) as u16 | self.f as u16 }
             Register16::SP => { self.sp }
         }
     }
@@ -220,9 +227,10 @@ impl Registers
                 self.h = (value >> 8) as u8;
                 self.l = (value & 0xFF) as u8;
             }
-            Register16::DSW => {
+            Register16::PSW => {
                 self.a = (value >> 8) as u8;
                 self.f = (value & 0xFF) as u8;
+                self.f = self.f & 0xD7 | 0x2;
             }
             Register16::SP => { self.sp = value; }
         }
@@ -236,7 +244,7 @@ impl Registers
             Register8::D => { self.d = value; }
             Register8::E => { self.e = value; }
             Register8::F => { self.f = value; }
-            Register8::H => { self.h = value; }
+            Register8::H => { self.h = value; self.f = self.f & 0xD7 | 0x2; }
             Register8::L => { self.l = value; }
             Register8::M => { bus.write_b(self.get_16(&Register16::HL), value); }
         }
@@ -271,7 +279,7 @@ impl Instruction8080
         const REGISTER8_TABLE_SECOND: [Register8; 4] = [Register8::C, Register8::E, Register8::L, Register8::A];
         const REGISTER8_TABLE_ALL: [Register8; 8] = [Register8::B, Register8::C, Register8::D, Register8::E, Register8::H, Register8::L, Register8::M, Register8::A];
         const REGISTER16_TABLE_FIRST: [Register16; 4] = [Register16::BC, Register16::DE, Register16::HL, Register16::SP];
-        const REGISTER16_TABLE_SECOND: [Register16; 4] = [Register16::BC, Register16::DE, Register16::HL, Register16::DSW];
+        const REGISTER16_TABLE_SECOND: [Register16; 4] = [Register16::BC, Register16::DE, Register16::HL, Register16::PSW];
         const CONDITION_TABLE_FIRST: [Condition; 4] = [Condition::NotZero, Condition::NotCarry, Condition::PairtyOdd, Condition::Plus];
         const CONDITION_TABLE_SECOND: [Condition; 4] = [Condition::Zero, Condition::Carry, Condition::ParityEven, Condition::Minus];
 
@@ -315,14 +323,12 @@ impl Instruction8080
     
             // INR first
             (0x0..=0x3, 0x4) => {
-                result.action = InstructionAction::AddReg { register: REGISTER8_TABLE_FIRST[opcode_high as usize], carry: false };
-                result.target = InstructionTarget::Immediate8 { value: 1 };
+                result.action = InstructionAction::IncrementReg { register: REGISTER8_TABLE_FIRST[opcode_high as usize] };
             }
 
             // DCR first
             (0x0..=0x3, 0x5) => {
-                result.action = InstructionAction::SubReg { register: REGISTER8_TABLE_FIRST[opcode_high as usize], carry: false };
-                result.target = InstructionTarget::Immediate8 { value: 1 };
+                result.action = InstructionAction::DecrementReg { register: REGISTER8_TABLE_FIRST[opcode_high as usize] };
             }
 
             // MVI first
@@ -360,7 +366,7 @@ impl Instruction8080
             (0x2, 0xA) => {
                 result.length += 2;
                 result.action = InstructionAction::LoadReg16FromMemory { register: Register16::HL };
-                result.target = InstructionTarget::Immediate16 { value: bus.read_w(pc + 1) };              
+                result.target = InstructionTarget::Immediate16 { value: bus.read_w(pc + 1) };
             }
 
             // LDA
@@ -375,14 +381,12 @@ impl Instruction8080
 
             // INR second
             (0x0..=0x3, 0xC) => {
-                result.action = InstructionAction::AddReg { register: REGISTER8_TABLE_SECOND[opcode_high as usize], carry: false };
-                result.target = InstructionTarget::Immediate8 { value: 1 };
+                result.action = InstructionAction::IncrementReg { register: REGISTER8_TABLE_SECOND[opcode_high as usize] };
             }
 
             // DCR second
             (0x0..=0x3, 0xD) => {
-                result.action = InstructionAction::SubReg { register: REGISTER8_TABLE_SECOND[opcode_high as usize], carry: false };
-                result.target = InstructionTarget::Immediate8 { value: 1 };
+                result.action = InstructionAction::DecrementReg { register: REGISTER8_TABLE_SECOND[opcode_high as usize] };
             }
 
             // MVI second
@@ -407,7 +411,7 @@ impl Instruction8080
 
             // MOV first
             (0x4..=0x7, 0x0..=0x7) => {
-                result.action = InstructionAction::MovReg { register: REGISTER8_TABLE_FIRST[(opcode_high - 0x4) as usize] };
+                result.action = InstructionAction::MovReg { register: REGISTER8_TABLE_FIRST[(opcode_high % 0x4) as usize] };
                 result.target = InstructionTarget::Register8 { register: REGISTER8_TABLE_ALL[opcode_low as usize] };
                 
                 // Mov M, M is actually Halt.
@@ -420,8 +424,8 @@ impl Instruction8080
 
             // MOV second
             (0x4..=0x7, 0x8..=0xF) => {
-                result.action = InstructionAction::MovReg { register: REGISTER8_TABLE_SECOND[(opcode_high - 0x4) as usize] };
-                result.target = InstructionTarget::Register8 { register: REGISTER8_TABLE_ALL[(opcode_low - 0x8) as usize] };
+                result.action = InstructionAction::MovReg { register: REGISTER8_TABLE_SECOND[(opcode_high % 0x4) as usize] };
+                result.target = InstructionTarget::Register8 { register: REGISTER8_TABLE_ALL[(opcode_low % 0x8) as usize] };
             }
 
         // Second row done.
@@ -436,7 +440,7 @@ impl Instruction8080
             
             // SUB / SBB
             (0x9, 0x0..=0xF) => {
-                result.action = InstructionAction::SubReg { register: Register8::A,  carry: opcode_low >= 0x8 };
+                result.action = InstructionAction::SubReg { register: Register8::A,  borrow: opcode_low >= 0x8 };
                 result.target = InstructionTarget::Register8 { register: REGISTER8_TABLE_ALL[(opcode_low % 0x8) as usize] };
             }
             
@@ -526,7 +530,7 @@ impl Instruction8080
             // SUI
             (0xD, 0x6) => {
                 result.length += 1;
-                result.action = InstructionAction::SubReg { register: Register8::A, carry: false };
+                result.action = InstructionAction::SubReg { register: Register8::A, borrow: false };
                 result.target = InstructionTarget::Immediate8 { value:  bus.read_b(pc + 1) }
             }
 
@@ -563,7 +567,7 @@ impl Instruction8080
 
             // PCHL
             (0xE, 0x9) => {
-                result.action = InstructionAction::Call { condition: Condition::None };
+                result.action = InstructionAction::Jump { condition: Condition::None };
                 result.target = InstructionTarget::Register16 { register: Register16::HL };
             }
 
@@ -577,7 +581,7 @@ impl Instruction8080
             (0xC..=0xF, 0xA) => {
                 result.length += 2;
                 result.action = InstructionAction::Jump { condition: CONDITION_TABLE_SECOND[(opcode_high - 0xC) as usize] };
-                result.target = InstructionTarget::Immediate16 { value: bus.read_w(pc + 1) };               
+                result.target = InstructionTarget::Immediate16 { value: bus.read_w(pc + 1) };
             }
 
             // IN
@@ -587,7 +591,7 @@ impl Instruction8080
                 result.target = InstructionTarget::Immediate8 { value: bus.read_b(pc + 1) }
             }
 
-            // Exchange
+            // XCHG
             (0xE, 0xB) => { result.action = InstructionAction::Exchange; }
 
             // EI
@@ -617,7 +621,7 @@ impl Instruction8080
             // SBI
             (0xD, 0xE) => {
                 result.length += 1;
-                result.action = InstructionAction::SubReg { register: Register8::A, carry: true };
+                result.action = InstructionAction::SubReg { register: Register8::A, borrow: true };
                 result.target = InstructionTarget::Immediate8 { value:  bus.read_b(pc + 1) }
             }
 
@@ -632,7 +636,7 @@ impl Instruction8080
             (0xF, 0xE) => {
                 result.length += 1;
                 result.action = InstructionAction::CompareReg { register: Register8::A };
-                result.target = InstructionTarget::Immediate8 { value:  bus.read_b(pc + 1) }
+                result.target = InstructionTarget::Immediate8 { value: bus.read_b(pc + 1) }
             }
 
             // Odd resets.

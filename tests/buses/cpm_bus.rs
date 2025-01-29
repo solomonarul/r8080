@@ -31,6 +31,16 @@ impl Drop for TestCPMBus {
             {
                 print!("{}", *char as char);
             }
+            println!("Per byte difference:");
+            for char in &self.output
+            {
+                print!("{:02X} ", *char);
+            }
+            println!("Expected:");
+            for char in self.expected_output.as_bytes()
+            {
+                print!("{:02X} ", *char);
+            }            
             panic!("[EROR]: Test ended with wrong output.");
         }
     }

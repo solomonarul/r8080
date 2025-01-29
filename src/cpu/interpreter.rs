@@ -47,27 +47,18 @@ impl CPU8080 for Interpreter8080
         let mut bus_write = self.bus.write().unwrap();
         // Check and execute interrupts if needed.
         let instruction = if self.registers.interrupts && bus_write.has_interrupt() {
+            self.registers.halting = false;
             Instruction8080::from_opcode(bus_write.get_interrupt(), self.registers.pc, &bus_write)
         }
         else {
+            if self.registers.halting { return }
             let opcode = bus_write.as_ref().read_b(self.registers.pc);
             let instruction = Instruction8080::from_opcode(opcode, self.registers.pc, &bus_write);
-            self.registers.pc += instruction.length as u16;
+            self.registers.pc = self.registers.pc.wrapping_add(instruction.length as u16);
             instruction
         };
 
         match instruction.action {
-        // Default / unimplemented.
-            InstructionAction::None => {
-                self.registers.running = false;
-                println!(
-                    "[EROR]: Unknown opcode found at PC 0x{:04X}: 0x{:02X}",
-                    self.registers.pc - instruction.length as u16, instruction.opcode
-                );
-                dbg!(&instruction);
-                panic!("[WARN]: Dying...");  // TODO: do some actual error handling instead of dying.
-            }
-
         // NOP.
             InstructionAction::Nothing => {}
 
@@ -94,7 +85,7 @@ impl CPU8080 for Interpreter8080
             }
 
             InstructionAction::Halt => {
-                self.registers.running = false;
+               self.registers.halting = true;
             }
 
             InstructionAction::SetInterrupts { enabled } => {
@@ -118,106 +109,102 @@ impl CPU8080 for Interpreter8080
                 self.registers.set_8(&register, &mut bus_write, value);
             }
 
-            InstructionAction::AddReg { register, carry } => {
-                let value = instruction.target.get_value_as_u8(&mut bus_write, &self.registers);
-                let register_value = self.registers.get_8(&mut bus_write, &register);
-                
-                // Do the addition with carry if needed.
-                let mut half_carry = (register_value & 0xF) + (value & 0xF) > 0xF;
-                let (mut result, mut carry_out) = register_value.overflowing_add(value);
+            InstructionAction::IncrementReg { register } => {
+                let register_value = self.registers.get_8(&mut bus_write, &register) as u16;
+                let result = ((register_value + 1) & 0xFF) as u8;
 
-                if carry {
-                    let carry_value = if self.registers.get_flag(RegisterFlags::Carry) { 1 } else { 0 };
-                    half_carry = ((result & 0xF) + (carry_value & 0xF) > 0xF) || half_carry;
-                    let (result_carry, carry_out_carry) = result.overflowing_add(carry_value);
-                    result = result_carry;
-                    carry_out = carry_out_carry || carry_out;
-                }
-                
                 // Set flags.
-                self.registers.set_flag(RegisterFlags::Zero, result == 0);
-                self.registers.set_flag(RegisterFlags::Sign, result & 0x80 != 0);
-                self.registers.set_flag(RegisterFlags::Parity, result.count_ones() % 2 == 0);
-                self.registers.set_flag(RegisterFlags::HalfCarry, half_carry);
-                self.registers.set_flag(RegisterFlags::Carry, carry_out);
+                self.registers.set_flag(RegisterFlags::HalfCarry, (result & 0xF) == 0x0);
+                self.registers.set_zsp(result);
 
                 self.registers.set_8(&register, &mut bus_write, result);
             }
 
-            InstructionAction::SubReg { register, carry } => {
-                let value = instruction.target.get_value_as_u8(&mut bus_write, &self.registers);
+            InstructionAction::DecrementReg { register } => {
                 let register_value = self.registers.get_8(&mut bus_write, &register);
-                
-                // Do the addition with carry if needed.
-                let mut half_carry = (register_value & 0xF) < (value & 0xF);
-                let (mut result, mut carry_out) = register_value.overflowing_sub(value);
-
-                if carry {
-                    let carry_value = if self.registers.get_flag(RegisterFlags::Carry) { 1 } else { 0 };
-                    half_carry = ((result & 0xF) < (carry_value & 0xF)) || half_carry;
-                    let (result_carry, carry_out_carry) = result.overflowing_sub(carry_value);
-                    result = result_carry;
-                    carry_out = carry_out_carry || carry_out;
-                }
+                let result = register_value.wrapping_sub(1);
                 
                 // Set flags.
-                self.registers.set_flag(RegisterFlags::Zero, result == 0);
-                self.registers.set_flag(RegisterFlags::Sign, result & 0x80 != 0);
-                self.registers.set_flag(RegisterFlags::Parity, result.count_ones() % 2 == 0);
-                self.registers.set_flag(RegisterFlags::HalfCarry, half_carry);
-                self.registers.set_flag(RegisterFlags::Carry, carry_out);
+                self.registers.set_flag(RegisterFlags::HalfCarry, (result & 0xF) != 0xF);
+                self.registers.set_zsp(result);
 
+                self.registers.set_8(&register, &mut bus_write, result);
+            }       
+
+            InstructionAction::AddReg { register, carry } => {
+                let value = instruction.target.get_value_as_u8(&mut bus_write, &self.registers) as u16;
+                let register_value = self.registers.get_8(&mut bus_write, &register) as u16;
+                let carry = if carry && self.registers.get_flag(RegisterFlags::Carry) { 1 } else { 0 };
+                let result = register_value + value + carry;
+                
+                // Set flags.
+                self.registers.set_flag(RegisterFlags::Carry, ((result ^ register_value ^ value) & (1 << 8)) != 0);
+                self.registers.set_flag(RegisterFlags::HalfCarry, ((result ^ register_value ^ value) & (1 << 4)) != 0);
+                
+                let result = (result & 0xFF) as u8;
+                self.registers.set_zsp(result);
+                self.registers.set_8(&register, &mut bus_write, result);
+            }
+
+            InstructionAction::SubReg { register, borrow: carry } => {
+                // Subtraction is same as addition with !value and inverted carries.
+                let value = !(instruction.target.get_value_as_u8(&mut bus_write, &self.registers) as u16);
+                let register_value = self.registers.get_8(&mut bus_write, &register) as u16;
+                let carry = if carry && self.registers.get_flag(RegisterFlags::Carry) { 0 } else { 1 };
+                let result = register_value.wrapping_add(value).wrapping_add(carry);
+                
+                // Set flags.
+                self.registers.set_flag(RegisterFlags::Carry, ((result ^ register_value ^ value) & (1 << 8)) == 0);
+                self.registers.set_flag(RegisterFlags::HalfCarry, ((result ^ register_value ^ value) & (1 << 4)) != 0);
+                
+                let result = (result & 0xFF) as u8;
+                self.registers.set_zsp(result);
                 self.registers.set_8(&register, &mut bus_write, result);
             }
 
             InstructionAction::CompareReg { register } => {
-                let value = instruction.target.get_value_as_u8(&mut bus_write, &self.registers);
-                let register_value = self.registers.get_8(&mut bus_write, &register);
+                let value = instruction.target.get_value_as_u8(&mut bus_write, &self.registers) as u16;
+                let register_value = self.registers.get_8(&mut bus_write, &register) as u16;
+                let result = register_value.wrapping_sub(value);
                 
-                // Do the addition with carry if needed.
-                let half_carry = (register_value & 0xF) < (value & 0xF);
-                let (result, carry_out) = register_value.overflowing_sub(value);
-                
-                self.registers.set_flag(RegisterFlags::Zero, result == 0);
-                self.registers.set_flag(RegisterFlags::Sign, result & 0x80 != 0);
-                self.registers.set_flag(RegisterFlags::Parity, result.count_ones() % 2 == 0);
-                self.registers.set_flag(RegisterFlags::HalfCarry, half_carry);
-                self.registers.set_flag(RegisterFlags::Carry, carry_out);
+                self.registers.set_flag(RegisterFlags::Carry, (result >> 8) != 0);
+                self.registers.set_flag(RegisterFlags::HalfCarry,  !(register_value ^ result ^ value) & 0x10 != 0);
+                self.registers.set_zsp((result & 0xFF) as u8);
             }
 
             InstructionAction::AndReg { register } => {
-                let register = self.registers.get_8(&mut bus_write, &register);
-                let target = instruction.target.get_value_as_u8(&mut bus_write, &self.registers);
-                let result = register & target;
+                let register_value = self.registers.get_8(&mut bus_write, &register);
+                let value = instruction.target.get_value_as_u8(&mut bus_write, &self.registers);
+                let result = register_value & value;
 
-                self.registers.set_flag(RegisterFlags::Zero, result == 0);
-                self.registers.set_flag(RegisterFlags::Sign, result & 0x80 != 0);
-                self.registers.set_flag(RegisterFlags::Parity, result.count_ones() % 2 == 0);
+                self.registers.set_flag(RegisterFlags::Carry, false);
+                self.registers.set_flag(RegisterFlags::HalfCarry, (register_value | value) & 0x08 != 0);
+                self.registers.set_zsp(result);
 
-                self.registers.set_8(&Register8::A, &mut bus_write, result);
+                self.registers.set_8(&register, &mut bus_write, result);
             }
 
             InstructionAction::OrReg { register } => {
-                let register = self.registers.get_8(&mut bus_write, &register);
-                let target = instruction.target.get_value_as_u8(&mut bus_write, &self.registers);
-                let result = register | target;
+                let register_value = self.registers.get_8(&mut bus_write, &register);
+                let value = instruction.target.get_value_as_u8(&mut bus_write, &self.registers);
+                let result = register_value | value;
 
-                self.registers.set_flag(RegisterFlags::Zero, result == 0);
-                self.registers.set_flag(RegisterFlags::Sign, result & 0x80 != 0);
-                self.registers.set_flag(RegisterFlags::Parity, result.count_ones() % 2 == 0);
+                self.registers.set_flag(RegisterFlags::Carry, false);
+                self.registers.set_flag(RegisterFlags::HalfCarry, false);
+                self.registers.set_zsp(result);
 
-                self.registers.set_8(&Register8::A, &mut bus_write, result);
+                self.registers.set_8(&register, &mut bus_write, result);
             }
 
             InstructionAction::XorReg { register } => {
-                let register = self.registers.get_8(&mut bus_write, &register);
-                let target = instruction.target.get_value_as_u8(&mut bus_write, &self.registers);
-                let result = register ^ target;
+                let register_value = self.registers.get_8(&mut bus_write, &register);
+                let value = instruction.target.get_value_as_u8(&mut bus_write, &self.registers);
+                let result = register_value ^ value;
 
-                self.registers.set_flag(RegisterFlags::Zero, result == 0);
-                self.registers.set_flag(RegisterFlags::Sign, result & 0x80 != 0);
-                self.registers.set_flag(RegisterFlags::Parity, result.count_ones() % 2 == 0);
-
+                self.registers.set_flag(RegisterFlags::Carry, false);
+                self.registers.set_flag(RegisterFlags::HalfCarry, false);
+                self.registers.set_zsp(result);
+                
                 self.registers.set_8(&Register8::A, &mut bus_write, result);
             }
 
@@ -240,25 +227,31 @@ impl CPU8080 for Interpreter8080
             }
 
             InstructionAction::DAAReg { register } => {
-                let register_value = self.registers.get_8(&mut bus_write, &register);
-                let mut value = 0x00;
-            
-                if register_value & 0x0F > 9 || self.registers.get_flag(RegisterFlags::HalfCarry) {
-                    value += 0x06;
+                let register_value = self.registers.get_8(&mut bus_write, &register) as u16;
+                let mut carry = self.registers.get_flag(RegisterFlags::Carry);
+                let mut correction = 0x00;
+
+                let lsb = register_value & 0xF;
+                let msb = register_value >> 4;
+
+                if self.registers.get_flag(RegisterFlags::HalfCarry) || lsb > 9 {
+                    correction += 0x06;
                 }
-                if register_value > 0x99 || self.registers.get_flag(RegisterFlags::Carry) { 
-                    value += 0x60;
+
+                if self.registers.get_flag(RegisterFlags::Carry) || msb > 9 || (msb >= 9 && lsb > 9) {
+                    correction += 0x60;
+                    carry = true;
                 }
+
+                // Set flags.
+                let result = register_value + correction;
+                self.registers.set_flag(RegisterFlags::Carry, ((result ^ register_value ^ correction) & (1 << 8)) != 0);
+                self.registers.set_flag(RegisterFlags::HalfCarry, ((result ^ register_value ^ correction) & (1 << 4)) != 0);
                 
-                let half_carry = (register_value & 0xF) + (value & 0xF) > 0xF;
-                let (result, carry_out) = register_value.overflowing_add(value);
-                self.registers.set_flag(RegisterFlags::Zero, result == 0);
-                self.registers.set_flag(RegisterFlags::Sign, result & 0x80 != 0);
-                self.registers.set_flag(RegisterFlags::Parity, result.count_ones() % 2 == 0);
-                self.registers.set_flag(RegisterFlags::HalfCarry, half_carry);
-                self.registers.set_flag(RegisterFlags::Carry, carry_out);
-            
+                let result = (result & 0xFF) as u8;
+                self.registers.set_zsp(result);
                 self.registers.set_8(&register, &mut bus_write, result);
+                self.registers.set_flag(RegisterFlags::Carry, carry);
             }
             
             InstructionAction::RotateReg { register, right, arithmetic } => {
@@ -293,7 +286,6 @@ impl CPU8080 for Interpreter8080
                 };
 
                 self.registers.set_flag(RegisterFlags::Carry, carry_out != 0);
-
                 self.registers.set_8(&register, &mut bus_write, result);
             }
         // End 8-bit registers section.
@@ -304,18 +296,18 @@ impl CPU8080 for Interpreter8080
             }
 
             InstructionAction::Increment16 { register } => {
-                let value = self.registers.get_16(&register);
-                self.registers.set_16(&register, value + 1);
+                let value = self.registers.get_16(&register).wrapping_add(1);
+                self.registers.set_16(&register, value);
             }
 
             InstructionAction::Decrement16 { register } => {
-                let value = self.registers.get_16(&register);
-                self.registers.set_16(&register, value - 1);
+                let value = self.registers.get_16(&register).wrapping_sub(1);
+                self.registers.set_16(&register, value);
             }
 
             InstructionAction::Add16 { register } => {
-                let value = instruction.target.get_value_as_u16(&mut self.registers);
                 let register_value = self.registers.get_16(&register);
+                let value = instruction.target.get_value_as_u16(&mut self.registers);
                 let (result, carry) = register_value.overflowing_add(value);
                 self.registers.set_flag(RegisterFlags::Carry, carry);
                 self.registers.set_16(&register, result);
@@ -353,8 +345,8 @@ impl CPU8080 for Interpreter8080
             }
 
             InstructionAction::ExchangeToStack => {
-                let hl = self.registers.get_16(&Register16::HL);
                 let value = bus_write.read_w(self.registers.sp);
+                let hl = self.registers.get_16(&Register16::HL);
                 bus_write.write_w(self.registers.sp, hl);
                 self.registers.set_16(&Register16::HL, value);
             }
@@ -372,6 +364,17 @@ impl CPU8080 for Interpreter8080
                 bus_write.out_b(&mut self.registers, value, a);
             }
         // End of bus section.
+
+        // Default / unimplemented.
+            _ => {
+                self.registers.running = false;
+                println!(
+                    "[EROR]: Unknown opcode found at PC 0x{:04X}: 0x{:02X}",
+                    self.registers.pc - instruction.length as u16, instruction.opcode
+                );
+                println!("{:#?}", instruction);
+                panic!("[WARN]: Dying...");  // TODO: do some actual error handling instead of dying.
+            }
         }        
     }
 

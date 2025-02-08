@@ -8,12 +8,7 @@ This will make sure that all reads / writes are redirected to your own devices.
 
 You can also force a jump to set up the starting PC using cpu.force_jump(address).
 
-For examples seee the tests/ folder.
-
-### TODOs:
-
-- cycle accurate execution.
-- graceful error handling.
+For examples see the tests/ folder.
 
 ---
 

@@ -17,6 +17,7 @@ pub type RegisterFlags = instruction::RegisterFlags;
 
 pub trait CPU8080: Any + Send + Sync
 {
+    fn get_executed_cycles(&mut self) -> u32;
     fn force_jump(&mut self, a: u16);
     fn set_bus(&mut self, b: Arc<RwLock<Box<dyn Bus8080>>>);
     fn get_bus(&self) -> Arc<RwLock<Box<dyn Bus8080>>>;

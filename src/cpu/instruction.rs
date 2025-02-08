@@ -1,6 +1,6 @@
 use crate::Bus8080;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Condition
 {
     None,
@@ -10,13 +10,13 @@ pub enum Condition
     Plus, Minus
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Register16
 {
     BC, DE, HL, SP, PSW
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Register8
 {
     A, B, C, D, E, F, H, L, M
@@ -72,7 +72,7 @@ pub enum RegisterFlags
     Parity
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum InstructionTarget
 {
     None,

@@ -4,7 +4,7 @@ use cpu::Registers;
 
 pub mod cpu;
 
-pub trait Bus8080: Any
+pub trait Bus8080: Any + Send + Sync
 {
     fn read_b(&self, a: u16) -> u8;
     fn read_w(&self, a: u16) -> u16;
